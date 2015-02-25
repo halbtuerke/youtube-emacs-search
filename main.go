@@ -79,7 +79,7 @@ func main() {
 	client := conf.Client(oauth2.NoContext, tok)
 
 	// Construct URL to query with value of last update
-	resp, err := client.Get("https://www.googleapis.com/youtube/v3/search?part=snippet&order=date&publishedAfter=2015-02-17T00%3A00%3A00Z&q=emacs&type=video")
+	resp, err := client.Get("https://www.googleapis.com/youtube/v3/search?part=snippet&order=date&publishedAfter=2015-02-17T00%3A00%3A00Z&q=emacs&type=video&maxResults=50")
 	check(err)
 
 	defer resp.Body.Close()
