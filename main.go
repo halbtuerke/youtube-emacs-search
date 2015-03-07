@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"os"
 	"os/user"
 	"time"
@@ -91,9 +92,24 @@ func main() {
 	file.WriteString(twoDaysAgo.Format(time.RFC3339))
 
 	// Show the result of the search
-	fmt.Println(string(htmlData))
+	// fmt.Println(string(htmlData))
+	ppJSON(htmlData)
 
 	// Send results via email
+}
+
+func ppJSON(data []byte) {
+	var dat map[string]interface{}
+
+	if err := json.Unmarshal(data, &dat); err != nil {
+		panic(err)
+	}
+
+	b, err := json.MarshalIndent(dat, "", "  ")
+	if err != nil {
+		log.Println(err)
+	}
+	fmt.Printf("%s\n", b)
 }
 
 func check(e error) {
