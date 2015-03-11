@@ -19,13 +19,24 @@ type credentials struct {
 	ClientSecret string `json:"clientSecret"`
 }
 
+var configPath = filepath.Join(userDir(), ".config", "youtube-emacs-search")
+
 func main() {
-	path := filepath.Join(userDir(), ".config", "youtube-emacs-search")
+
+	dirInfo, err := os.Stat(configPath)
+
+	if err != nil || !dirInfo.IsDir() {
+		fmt.Println("There's no config directory. Creating it now...")
+		if err = os.MkdirAll(configPath, 0700); err != nil {
+			fmt.Println("Something went wrong while creating the config directory")
+			os.Exit(1)
+		}
+	}
+
+	path := filepath.Join(configPath, "timestamp")
 
 	var file *os.File
-	var err error
 
-	// Get value of last update from some file => ~/.config/youtube-emacs
 	file, err = os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0666)
 	defer file.Close()
 
@@ -126,11 +137,11 @@ func userDir() (userDir string) {
 }
 
 func loadOauthCredentials() (cred credentials) {
-	credentialsFile, err := os.Open(filepath.Join(userDir(), ".config", "youtube-oauth-credentials"))
+	credentialsFile, err := os.Open(filepath.Join(configPath, "youtube-oauth-credentials"))
 	defer credentialsFile.Close()
 
 	if err != nil {
-		fmt.Println("Please add your YouTube API credentials to ~/.config/youtube-oauth-credentials")
+		fmt.Printf("Please add your YouTube API credentials to %s\n", filepath.Join(configPath, "youtube-oauth-credentials"))
 		os.Exit(1)
 	}
 
@@ -142,7 +153,7 @@ func loadOauthCredentials() (cred credentials) {
 }
 
 func saveToken(token *oauth2.Token) {
-	tokenFile, err := os.Create(filepath.Join(userDir(), ".config", "youtube-oauth-token"))
+	tokenFile, err := os.Create(filepath.Join(configPath, "youtube-oauth-token"))
 	defer tokenFile.Close()
 	check(err)
 
@@ -151,7 +162,7 @@ func saveToken(token *oauth2.Token) {
 }
 
 func loadToken() (token *oauth2.Token, err error) {
-	tokenFile, err := os.Open(filepath.Join(userDir(), ".config", "youtube-oauth-token"))
+	tokenFile, err := os.Open(filepath.Join(configPath, "youtube-oauth-token"))
 	defer tokenFile.Close()
 
 	if err != nil {
