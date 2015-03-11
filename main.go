@@ -7,8 +7,10 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"os/exec"
 	"os/user"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -74,9 +76,24 @@ func main() {
 
 	if err != nil {
 		url := conf.AuthCodeURL("state", oauth2.AccessTypeOffline)
-		fmt.Printf("Visit the URL for the auth dialog then come back here and paste the token:\n%v\n\n", url)
+		fmt.Printf("Press any key to visit the URL for the auth dialog then come back here and paste the token:\n%v\n\n", url)
 
 		var code string
+		if _, err := fmt.Scanf("\n"); err != nil {
+			check(err)
+		}
+
+		switch runtime.GOOS {
+		case "darwin":
+			cmd := exec.Command("open", url)
+			cmd.Run()
+		case "linux":
+			cmd := exec.Command("xgdopen", url)
+			cmd.Run()
+		default:
+			fmt.Println("Sorry but you have to open the URL manually")
+		}
+
 		if _, err := fmt.Scan(&code); err != nil {
 			check(err)
 		}
