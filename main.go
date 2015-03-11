@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"os/user"
+	"path/filepath"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -19,7 +20,7 @@ type credentials struct {
 }
 
 func main() {
-	path := userDir() + "/.config/youtube-emacs-search"
+	path := filepath.Join(userDir(), ".config", "youtube-emacs-search")
 
 	var file *os.File
 	var err error
@@ -125,7 +126,7 @@ func userDir() (userDir string) {
 }
 
 func loadOauthCredentials() (cred credentials) {
-	credentialsFile, err := os.Open(userDir() + "/.config/youtube-oauth-credentials")
+	credentialsFile, err := os.Open(filepath.Join(userDir(), ".config", "youtube-oauth-credentials"))
 	defer credentialsFile.Close()
 
 	if err != nil {
@@ -141,7 +142,7 @@ func loadOauthCredentials() (cred credentials) {
 }
 
 func saveToken(token *oauth2.Token) {
-	tokenFile, err := os.Create(userDir() + "/.config/youtube-oauth-token")
+	tokenFile, err := os.Create(filepath.Join(userDir(), ".config", "youtube-oauth-token"))
 	defer tokenFile.Close()
 	check(err)
 
@@ -150,7 +151,7 @@ func saveToken(token *oauth2.Token) {
 }
 
 func loadToken() (token *oauth2.Token, err error) {
-	tokenFile, err := os.Open(userDir() + "/.config/youtube-oauth-token")
+	tokenFile, err := os.Open(filepath.Join(userDir(), ".config", "youtube-oauth-token"))
 	defer tokenFile.Close()
 
 	if err != nil {
