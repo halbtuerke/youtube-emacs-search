@@ -1,24 +1,81 @@
 package main
 
 import (
+	"bytes"
 	"encoding/gob"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"log"
+	"net/smtp"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/user"
 	"path/filepath"
 	"runtime"
+	"strings"
+	"text/template"
 	"time"
 
 	"golang.org/x/oauth2"
 )
 
+type youtubeVideos struct {
+	Etag  string `json:"etag"`
+	Items []struct {
+		Etag string `json:"etag"`
+		ID   struct {
+			Kind    string `json:"kind"`
+			VideoID string `json:"videoId"`
+		} `json:"id"`
+		Kind    string `json:"kind"`
+		Snippet struct {
+			ChannelID            string `json:"channelId"`
+			ChannelTitle         string `json:"channelTitle"`
+			Description          string `json:"description"`
+			LiveBroadcastContent string `json:"liveBroadcastContent"`
+			PublishedAt          string `json:"publishedAt"`
+			Thumbnails           struct {
+				Default struct {
+					URL string `json:"url"`
+				} `json:"default"`
+				High struct {
+					URL string `json:"url"`
+				} `json:"high"`
+				Medium struct {
+					URL string `json:"url"`
+				} `json:"medium"`
+			} `json:"thumbnails"`
+			Title string `json:"title"`
+		} `json:"snippet"`
+	} `json:"items"`
+	Kind          string `json:"kind"`
+	NextPageToken string `json:"nextPageToken"`
+	PageInfo      struct {
+		ResultsPerPage float64 `json:"resultsPerPage"`
+		TotalResults   float64 `json:"totalResults"`
+	} `json:"pageInfo"`
+}
+
 type credentials struct {
 	ClientID     string `json:"clientID"`
 	ClientSecret string `json:"clientSecret"`
+	SMTPHost     string `json:"smtpHost"`
+	SMTPPort     int    `json:"smtpPort"`
+	SMTPUserName string `json:"smtpUserName"`
+	SMTPPassword string `json:"smtpPassword"`
+}
+
+type video struct {
+	Title       string
+	Description string
+	Thumbnail   string
+	ID          string
+}
+
+type data struct {
+	Videos []video
 }
 
 var configPath = filepath.Join(userDir(), ".config", "youtube-emacs-search")
@@ -50,7 +107,9 @@ func main() {
 		fmt.Printf("%s does not exist! Creating it...\n", path)
 		file.WriteString(twoDaysAgo.Format(time.RFC3339))
 	} else {
-		file, err = os.OpenFile(path, os.O_RDWR, 0666)
+		dat, err := ioutil.ReadFile(path)
+		check(err)
+		twoDaysAgo, err = time.Parse(time.RFC3339, string(dat))
 		check(err)
 	}
 
@@ -108,8 +167,10 @@ func main() {
 
 	client := conf.Client(oauth2.NoContext, tok)
 
+	date := url.QueryEscape(twoDaysAgo.Format(time.RFC3339))
+
 	// Construct URL to query with value of last update
-	resp, err := client.Get("https://www.googleapis.com/youtube/v3/search?part=snippet&order=date&publishedAfter=2015-02-17T00%3A00%3A00Z&q=emacs&type=video&maxResults=50")
+	resp, err := client.Get("https://www.googleapis.com/youtube/v3/search?part=snippet&order=date&publishedAfter=" + date + "&q=emacs&type=video&maxResults=50")
 	check(err)
 
 	defer resp.Body.Close()
@@ -118,13 +179,42 @@ func main() {
 	check(err)
 
 	// If everything went fine write the current time into update value
-	file.WriteString(twoDaysAgo.Format(time.RFC3339))
+	timeBuffer := bytes.NewBufferString(t.Format(time.RFC3339))
+	ioutil.WriteFile(path, timeBuffer.Bytes(), 0700)
 
-	// Show the result of the search
-	// fmt.Println(string(htmlData))
-	ppJSON(htmlData)
+	videos := decodeYoutubeJSON(htmlData)
 
-	// Send results via email
+	videoData := make([]video, 10)
+
+	for _, value := range videos.Items {
+		snippet := value.Snippet
+		videoData = append(videoData, video{snippet.Title, snippet.Description, snippet.Thumbnails.Medium.URL, value.ID.VideoID})
+	}
+
+	templateData := data{
+		Videos: videoData,
+	}
+
+	buffer := new(bytes.Buffer)
+
+	template := template.Must(template.New("videosTemplate").Parse(youtubeVideoTemplate()))
+	err = template.Execute(buffer, &templateData)
+	check(err)
+
+	if len(videos.Items) == 0 {
+		fmt.Println("There were no new videos")
+	} else {
+		// Send results via email
+		sendEmail(
+			cred.SMTPHost,
+			cred.SMTPPort,
+			cred.SMTPUserName,
+			cred.SMTPPassword,
+			[]string{cred.SMTPUserName},
+			"YouTube Emacs Search",
+			buffer.String())
+	}
+
 }
 
 func ppJSON(data []byte) {
@@ -169,6 +259,14 @@ func loadOauthCredentials() (cred credentials) {
 	return
 }
 
+func decodeYoutubeJSON(jsonData []byte) (videos youtubeVideos) {
+	dec := json.NewDecoder(bytes.NewReader(jsonData))
+	err := dec.Decode(&videos)
+	check(err)
+
+	return
+}
+
 func saveToken(token *oauth2.Token) {
 	tokenFile, err := os.Create(filepath.Join(configPath, "youtube-oauth-token"))
 	defer tokenFile.Close()
@@ -190,4 +288,64 @@ func loadToken() (token *oauth2.Token, err error) {
 	err = tokenDecoder.Decode(&token)
 	check(err)
 	return
+}
+
+func sendEmail(host string, port int, userName string, password string, to []string, subject string, message string) (err error) {
+	defer check(err)
+
+	parameters := struct {
+		From    string
+		To      string
+		Subject string
+		Message string
+	}{
+		userName,
+		strings.Join([]string(to), ","),
+		subject,
+		message,
+	}
+
+	buffer := new(bytes.Buffer)
+
+	template := template.Must(template.New("emailTemplate").Parse(emailScript()))
+	template.Execute(buffer, &parameters)
+
+	auth := smtp.PlainAuth("", userName, password, host)
+
+	err = smtp.SendMail(
+		fmt.Sprintf("%s:%d", host, port),
+		auth,
+		userName,
+		to,
+		buffer.Bytes())
+
+	return err
+}
+
+func emailScript() (script string) {
+	return `From: {{.From}}
+To: {{.To}}
+Subject: {{.Subject}}
+MIME-version: 1.0
+Content-Type: text/html; charset="UTF-8"
+
+{{.Message}}`
+}
+
+func youtubeVideoTemplate() (script string) {
+	return `<html>
+<body>
+	<table>
+	{{with .Videos}}
+		{{range .}}
+		<tr>
+			<td><a href="https://youtube.com/watch?v={{.ID}}"><img src="{{.Thumbnail}}"</a></td>
+			<td>{{.Title}}</td>
+			<td>{{.Description}}</td>
+		<tr>
+		{{end}}
+	{{end}}
+	</table>
+<body>
+<html>`
 }
